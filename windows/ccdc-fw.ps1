@@ -242,7 +242,7 @@ function Get-Plan([bool]$interactive) {
 function Remove-OurRules { Remove-NetFirewallRule -Group $Group -ErrorAction SilentlyContinue }
 
 function Get-OtherInboundRules {
-    @(Get-NetFirewallRule -Direction Inbound -Enabled True |
+    (Get-NetFirewallRule -Direction Inbound -Enabled True |
         Where-Object { $_.Group -ne $Group -and $_.DisplayGroup -ne 'Core Networking' })
 }
 
@@ -260,7 +260,8 @@ function Set-Policy($rules) {
         New-NetFirewallRule @p | Out-Null
     }
     # Everything else inbound goes, except Core Networking (DHCP, IPv6 neighbour discovery).
-    $others = Get-OtherInboundRules
+    # @() at the call site: a lone CimInstance has no .Count in PS 5.1.
+    $others = @(Get-OtherInboundRules)
     if ($others.Count) { Disable-NetFirewallRule -InputObject $others }
     Set-NetFirewallProfile -Profile Domain, Private, Public -Enabled True -DefaultInboundAction Block `
         -DefaultOutboundAction Allow -AllowInboundRules True -NotifyOnListen False -LogBlocked True `
@@ -275,7 +276,7 @@ function Test-Drift($rules) {
     $ours = @(Get-NetFirewallRule -Group $Group -ErrorAction SilentlyContinue)
     if ($ours.Count -ne $rules.Count) { return "expected $($rules.Count) CCDC-FW rules, found $($ours.Count)" }
     if ($ours | Where-Object { $_.Enabled -ne 'True' -or $_.Action -ne 'Allow' }) { return 'CCDC-FW rule disabled/changed' }
-    $extra = Get-OtherInboundRules
+    $extra = @(Get-OtherInboundRules)
     if ($extra.Count) { return "new inbound rule(s): $(($extra | Select-Object -First 5 -ExpandProperty DisplayName) -join '; ')" }
     return $null
 }
