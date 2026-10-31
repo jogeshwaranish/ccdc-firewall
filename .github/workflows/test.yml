@@ -1,0 +1,91 @@
+name: test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck -s sh linux/ccdc-fw.sh tests/*.sh
+
+  linux-netns:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        backend: [nft, iptables]
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo sh tests/netns-test.sh ${{ matrix.backend }}
+
+  linux-distros:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:trixie", "debian:bookworm", "ubuntu:22.04", "rockylinux:9", "archlinux:latest", "alpine:3.20"]
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh tests/distro-test.sh ${{ matrix.image }} docker
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $r = Invoke-ScriptAnalyzer -Path windows/ccdc-fw.ps1 -Severity Error
+          $r | Format-Table -AutoSize | Out-String -Width 200
+          if ($r) { exit 1 }
+
+      - name: End-to-end (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $fw = "$PWD\windows\ccdc-fw.ps1"
+          $installed = "$env:ProgramData\ccdc-fw\ccdc-fw.ps1"
+          function Status { (Get-Content "$env:ProgramData\ccdc-fw\state.json" -Raw | ConvertFrom-Json).Status }
+          function Has8080 { [bool](Get-NetFirewallRule -Group CCDC-FW -ErrorAction SilentlyContinue | Get-NetFirewallPortFilter | Where-Object LocalPort -eq '8080') }
+
+          & $fw -Action Scan
+
+          Write-Host '--- apply + confirm'
+          & $fw -Action Apply -Yes -Allow 8080 -RollbackSeconds 60
+          if ((Status) -ne 'pending') { throw 'expected pending' }
+          if (-not (Get-ScheduledTask -TaskName CCDC-FW-Rollback -ErrorAction SilentlyContinue)) { throw 'no rollback task' }
+          & $installed -Action Confirm
+          if ((Status) -ne 'confirmed') { throw 'expected confirmed' }
+          if ((Get-NetFirewallProfile -Profile Public).DefaultInboundAction -ne 'Block') { throw 'inbound default is not Block' }
+          if (-not (Has8080)) { throw 'no 8080 rule' }
+
+          Write-Host '--- enforce disables a rogue rule'
+          New-NetFirewallRule -DisplayName 'rogue 4444' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4444 | Out-Null
+          & $installed -Action Enforce
+          if ((Get-NetFirewallRule -DisplayName 'rogue 4444').Enabled -ne 'False') { throw 'enforce left the rogue rule enabled' }
+          Set-NetFirewallProfile -Profile Public -DefaultInboundAction Allow
+          & $installed -Action Enforce
+          if ((Get-NetFirewallProfile -Profile Public).DefaultInboundAction -ne 'Block') { throw 'enforce did not restore Block' }
+          if (-not (Select-String -Path "$env:ProgramData\ccdc-fw\ccdc-fw.log" -Pattern TAMPER -Quiet)) { throw 'no TAMPER log' }
+
+          Write-Host '--- persist'
+          & $installed -Action Persist
+          if (-not (Get-ScheduledTask -TaskName CCDC-FW-Enforce -ErrorAction SilentlyContinue)) { throw 'no enforce task' }
+
+          Write-Host '--- rollback timer restores the previous confirmed rules'
+          & $fw -Action Apply -Yes -RollbackSeconds 30
+          if (Has8080) { throw '8080 should be gone in the new rules' }
+          $deadline = (Get-Date).AddSeconds(120)
+          while ((Status) -ne 'confirmed' -and (Get-Date) -lt $deadline) { Start-Sleep 5 }
+          if ((Status) -ne 'confirmed') { throw 'rollback task did not fire' }
+          if (-not (Has8080)) { throw '8080 rule not restored by rollback' }
+
+          & $installed -Action Status
+          & $installed -Action Off
+          if (Get-ScheduledTask -TaskName CCDC-FW-Enforce -ErrorAction SilentlyContinue) { throw 'enforce task still present' }
+          Write-Host 'PASS'
