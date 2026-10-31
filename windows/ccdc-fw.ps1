@@ -398,7 +398,8 @@ switch ($Action) {
     }
     'Enforce' {
         if ((Get-State).Status -ne 'confirmed') { return }
-        $rules = @(Get-Content (Join-Path $StateDir 'rules.json') -Raw | ConvertFrom-Json)
+        # PS 5.1's ConvertFrom-Json emits the array as one object; the extra pipe unrolls it.
+        $rules = @(Get-Content (Join-Path $StateDir 'rules.json') -Raw | ConvertFrom-Json | ForEach-Object { $_ })
         $drift = Test-Drift $rules
         if ($drift) {
             Write-Log "TAMPER: $drift - re-applying"

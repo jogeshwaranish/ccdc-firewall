@@ -20,7 +20,7 @@ fi
 WORK=$(mktemp -d)
 export CCDC_FW_DIR="$WORK/state"
 PIDS=""
-# shellcheck disable=SC2329  # used by the trap below
+# shellcheck disable=SC2317,SC2329  # used by the trap below
 cleanup() { for p in $PIDS; do kill "$p" 2>/dev/null || true; done; rm -rf "$WORK"; }
 trap cleanup EXIT
 
