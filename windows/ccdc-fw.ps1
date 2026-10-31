@@ -403,7 +403,10 @@ switch ($Action) {
         $drift = Test-Drift $rules
         if ($drift) {
             Write-Log "TAMPER: $drift - re-applying"
+            Write-Host "TAMPER: $drift - re-applying"
             Set-Policy $rules
+        } else {
+            Write-Host 'No drift.'
         }
     }
     'Persist' {

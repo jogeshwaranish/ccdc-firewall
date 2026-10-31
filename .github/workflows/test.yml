@@ -67,7 +67,12 @@ jobs:
           Write-Host '--- enforce disables a rogue rule'
           New-NetFirewallRule -DisplayName 'rogue 4444' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4444 | Out-Null
           & $installed -Action Enforce
-          if ((Get-NetFirewallRule -DisplayName 'rogue 4444').Enabled -ne 'False') { throw 'enforce left the rogue rule enabled' }
+          $rogue = Get-NetFirewallRule -DisplayName 'rogue 4444'
+          if ($rogue.Enabled -ne 'False') {
+              $rogue | Format-List Name, DisplayName, Enabled, Direction, Action, Group, DisplayGroup, PolicyStoreSource | Out-String | Write-Host
+              Get-Content "$env:ProgramData\ccdc-fw\ccdc-fw.log" | Write-Host
+              throw 'enforce left the rogue rule enabled'
+          }
           Set-NetFirewallProfile -Profile Public -DefaultInboundAction Allow
           & $installed -Action Enforce
           if ((Get-NetFirewallProfile -Profile Public).DefaultInboundAction -ne 'Block') { throw 'enforce did not restore Block' }
