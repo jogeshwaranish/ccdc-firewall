@@ -144,5 +144,5 @@ sh tests/distro-test.sh debian:trixie podman
 
 The netns test starts real listeners (a "web server", a "node app", an unknown port and a fake `nc`),
 applies the firewall, and checks from a second namespace that only the right ports answer. It also
-covers confirm, `--allow`, revert, the rollback timer, tamper recovery and `off`. CI runs it on Debian 12/13,
-Ubuntu 22.04, Rocky 9, Arch and Alpine, and runs the Windows script end-to-end on a Windows runner.
+covers confirm, `--allow`, revert, the rollback timer, tamper recovery and `off`. It has passed on Debian 12/13,
+Ubuntu 22.04, Rocky 9, Arch and Alpine.
